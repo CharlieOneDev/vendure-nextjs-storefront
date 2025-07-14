@@ -1,53 +1,55 @@
-ARG NODE_VER=20
-FROM node:$NODE_VER-alpine AS base
+# syntax=docker/dockerfile:1
 
-USER node
-WORKDIR /home/node
+# 1. Installer Stage: Install dependencies
+FROM node:20-alpine AS deps
+WORKDIR /app
 
-# 1. Install dependencies only when needed
-FROM base AS deps
-
-# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
-USER root
+# Install OS-level dependencies
 RUN apk add --no-cache libc6-compat
-USER node
 
-# Install dependencies based on the preferred package manager
+# Copy dependency definition files
 COPY --chown=node:node package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
-#RUN --mount=type=cache,target=/home/node/.npm,uid=1000,gid=1000 npm ci --prefer-offline
-# --- FIX: Receive the cache key and use it as a prefix ---
+
+# --- RAILWAY CACHE FIX ---
+# Use Railway's cache key to cache npm packages
 ARG RAILWAY_CACHE_KEY
-RUN --mount=type=cache,id=${RAILWAY_CACHE_KEY}-npm-cache,target=/home/node/.npm,uid=1000,gid=1000 npm ci --prefer-offline
+RUN --mount=type=cache,id=${RAILWAY_CACHE_KEY}-npm,target=/usr/src/app/.npm \
+    npm ci --no-audit --no-fund --prefer-offline
 
-# 2. Rebuild the source code only when needed
+# 2. Builder Stage: Build the Next.js application
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
 
-FROM base AS builder
-
-COPY --from=deps --chown=node:node /home/node/node_modules ./node_modules
-COPY --chown=node:node . .
-
-#RUN --mount=type=cache,target=/home/node/.npm,uid=1000,gid=1000 yarn build \
-# --- FIX: Receive the cache key again for this stage and use it ---
+# --- RAILWAY CACHE FIX ---
+# Also use cache for the build process itself
 ARG RAILWAY_CACHE_KEY
-RUN --mount=type=cache,id=${RAILWAY_CACHE_KEY}-npm-cache,target=/home/node/.npm,uid=1000,gid=1000 yarn build \
-  && rm -r .next/standalone/node_modules \
-  && rm -r node_modules \
-  && npm ci --omit-dev --prefer-offline
+ENV NEXT_TELEMETRY_DISABLED 1
+RUN --mount=type=cache,id=${RAILWAY_CACHE_KEY}-npm,target=/usr/src/app/.npm \
+    --mount=type=cache,id=${RAILWAY_CACHE_KEY}-nextjs,target=.next/cache \
+    npm run build
 
-# 3. Production image, copy all the files and run next
-FROM base AS runner
+# 3. Runner Stage: Create the final, small production image
+FROM node:20-alpine AS runner
+WORKDIR /app
 
-ENV NODE_ENV=production
+ENV NODE_ENV production
+ENV NEXT_TELEMETRY_DISABLED 1
 
-COPY --from=builder --chown=node:node /home/node/public ./public
+# Create a non-root user for security
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
 
-# Automatically leverage output traces to reduce image size
-# https://nextjs.org/docs/advanced-features/output-file-tracing
-COPY --from=builder --chown=node:node /home/node/node_modules ./node_modules
-COPY --from=builder --chown=node:node /home/node/.next/standalone ./
-COPY --from=builder --chown=node:node /home/node/.next/static ./.next/static
+# Copy files from the builder stage, respecting the standalone output structure
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# Set the user and expose the port
+USER nextjs
 EXPOSE 3000
-ENV PORT=3000
+ENV PORT 3000
 
+# Start the application
 CMD ["node", "server.js"]
