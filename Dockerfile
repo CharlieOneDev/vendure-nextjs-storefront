@@ -14,7 +14,10 @@ USER node
 
 # Install dependencies based on the preferred package manager
 COPY --chown=node:node package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
-RUN --mount=type=cache,id=npm-cache,target=/home/node/.npm,uid=1000,gid=1000 npm ci --prefer-offline
+#RUN --mount=type=cache,target=/home/node/.npm,uid=1000,gid=1000 npm ci --prefer-offline
+# --- FIX: Receive the cache key and use it as a prefix ---
+ARG RAILWAY_CACHE_KEY
+RUN --mount=type=cache,id=${RAILWAY_CACHE_KEY}-npm-cache,target=/home/node/.npm,uid=1000,gid=1000 npm ci --prefer-offline
 
 # 2. Rebuild the source code only when needed
 
@@ -23,7 +26,10 @@ FROM base AS builder
 COPY --from=deps --chown=node:node /home/node/node_modules ./node_modules
 COPY --chown=node:node . .
 
-RUN --mount=type=cache,id=npm-cache,target=/home/node/.npm,uid=1000,gid=1000 yarn build \
+#RUN --mount=type=cache,target=/home/node/.npm,uid=1000,gid=1000 yarn build \
+# --- FIX: Receive the cache key again for this stage and use it ---
+ARG RAILWAY_CACHE_KEY
+RUN --mount=type=cache,id=${RAILWAY_CACHE_KEY}-npm-cache,target=/home/node/.npm,uid=1000,gid=1000 yarn build \
   && rm -r .next/standalone/node_modules \
   && rm -r node_modules \
   && npm ci --omit-dev --prefer-offline
