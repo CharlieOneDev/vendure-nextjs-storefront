@@ -12,8 +12,7 @@ COPY --chown=node:node package.json yarn.lock* package-lock.json* pnpm-lock.yaml
 
 # --- RAILWAY CACHE FIX ---
 # This is the officially documented way to use cache on Railway.
-# Replace <YOUR_SERVICE_ID> with your actual Service ID from Railway settings.
-RUN --mount=type=cache,id=s/cb6d2722-e104-47ef-a84e-a29958cb94a5-/app/.npm,target=/app/.npm,uid=1000 \
+RUN --mount=type=cache,id=s/b267c943-43ed-47a4-bf25-b90952ea9fee-/app/.npm,target=/app/.npm,uid=1000 \
     npm ci --no-audit --no-fund --prefer-offline --cache .npm
 
 # --- Stage 2: Build the application ---
@@ -27,9 +26,8 @@ ENV NEXT_TELEMETRY_DISABLED 1
 
 # --- RAILWAY CACHE FIX ---
 # Also use cache for the build process itself.
-# Replace <YOUR_SERVICE_ID> with your actual Service ID from Railway settings.
-RUN --mount=type=cache,id=s/cb6d2722-e104-47ef-a84e-a29958cb94a5-/app/.npm,target=/app/.npm,uid=1000 \
-    --mount=type=cache,id=s/cb6d2722-e104-47ef-a84e-a29958cb94a5-.next/cache,target=.next/cache,uid=1000 \
+RUN --mount=type=cache,id=s/b267c943-43ed-47a4-bf25-b90952ea9fee-/app/.npm,target=/app/.npm,uid=1000 \
+    --mount=type=cache,id=s/b267c943-43ed-47a4-bf25-b90952ea9fee-.next/cache,target=.next/cache,uid=1000 \
     npm run build
 
 # --- Stage 3: Production runner ---
