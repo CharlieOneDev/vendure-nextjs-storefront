@@ -1,36 +1,38 @@
 # syntax=docker/dockerfile:1
 
-# 1. Installer Stage: Install dependencies
+# --- Stage 1: Install dependencies ---
 FROM node:20-alpine AS deps
 WORKDIR /app
 
-# Install OS-level dependencies
+# Install OS-level dependencies needed for some packages
 RUN apk add --no-cache libc6-compat
 
-# Copy dependency definition files
+# Copy dependency manifests
 COPY --chown=node:node package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
 
 # --- RAILWAY CACHE FIX ---
-# Use Railway's cache key to cache npm packages
-ARG RAILWAY_CACHE_KEY
-RUN --mount=type=cache,id=${RAILWAY_CACHE_KEY}-npm,target=/usr/src/app/.npm \
-    npm ci --no-audit --no-fund --prefer-offline
+# This is the officially documented way to use cache on Railway.
+# Replace <YOUR_SERVICE_ID> with your actual Service ID from Railway settings.
+RUN --mount=type=cache,id=s/cb6d2722-e104-47ef-a84e-a29958cb94a5-/app/.npm,target=/app/.npm,uid=1000 \
+    npm ci --no-audit --no-fund --prefer-offline --cache .npm
 
-# 2. Builder Stage: Build the Next.js application
+# --- Stage 2: Build the application ---
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# --- RAILWAY CACHE FIX ---
-# Also use cache for the build process itself
-ARG RAILWAY_CACHE_KEY
+# Set build-time env vars
 ENV NEXT_TELEMETRY_DISABLED 1
-RUN --mount=type=cache,id=${RAILWAY_CACHE_KEY}-npm,target=/usr/src/app/.npm \
-    --mount=type=cache,id=${RAILWAY_CACHE_KEY}-nextjs,target=.next/cache \
+
+# --- RAILWAY CACHE FIX ---
+# Also use cache for the build process itself.
+# Replace <YOUR_SERVICE_ID> with your actual Service ID from Railway settings.
+RUN --mount=type=cache,id=s/cb6d2722-e104-47ef-a84e-a29958cb94a5-/app/.npm,target=/app/.npm,uid=1000 \
+    --mount=type=cache,id=s/cb6d2722-e104-47ef-a84e-a29958cb94a5-.next/cache,target=.next/cache,uid=1000 \
     npm run build
 
-# 3. Runner Stage: Create the final, small production image
+# --- Stage 3: Production runner ---
 FROM node:20-alpine AS runner
 WORKDIR /app
 
@@ -41,12 +43,12 @@ ENV NEXT_TELEMETRY_DISABLED 1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy files from the builder stage, respecting the standalone output structure
+# Copy only necessary files from the builder stage for a small production image
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Set the user and expose the port
+# Set correct user and expose port
 USER nextjs
 EXPOSE 3000
 ENV PORT 3000
